@@ -21,7 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -118,7 +118,7 @@ fun ChannelsScreen(ui: Ui, shared: String?, consumeShared: () -> Unit) {
                             if (Store.channels.count { it.id == c.id } > 1) Pill("duplicate", color = Warn)
                         }
                     }
-                    IconBtn(Icons.Outlined.OpenInNew, "Open on YouTube") {
+                    IconBtn(Icons.AutoMirrored.Outlined.OpenInNew, "Open on YouTube") {
                         ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/channel/${c.id}")))
                     }
                     Spacer(Modifier.width(8.dp))

@@ -38,22 +38,6 @@ jobs:
           set -o pipefail
           gradle :app:assembleRelease --no-daemon --console=plain 2>&1 | tee build.log
 
-      - name: Save build log to the ci-log branch (for troubleshooting)
-        if: always()
-        run: |
-          grep -nE "^e: |^w: .*deprecated|error:|What went wrong|FAILURE|Could not|> Task .* FAILED" build.log > errors.txt || true
-          git config user.name "ci"
-          git config user.email "ci@users.noreply.github.com"
-          mkdir -p /tmp/ci && cp build.log errors.txt /tmp/ci/
-          git fetch origin ci-log || true
-          git checkout --orphan ci-log-tmp
-          git rm -rf --cached . > /dev/null
-          rm -rf ./* .github .gitignore || true
-          cp /tmp/ci/* .
-          git add build.log errors.txt
-          git commit -m "Build log for run ${{ github.run_number }} (${{ job.status }})"
-          git push -f origin HEAD:ci-log
-
       - name: Collect APKs
         run: |
           mkdir out
@@ -72,3 +56,19 @@ jobs:
           name: ytdl ${{ github.run_number }}
           make_latest: true
           files: out/*.apk
+
+      - name: Save build log to the ci-log branch (for troubleshooting)
+        if: always()
+        run: |
+          grep -nE "^e: |^w: .*deprecated|error:|What went wrong|FAILURE|Could not|> Task .* FAILED" build.log > errors.txt || true
+          git config user.name "ci"
+          git config user.email "ci@users.noreply.github.com"
+          mkdir -p /tmp/ci && cp build.log errors.txt /tmp/ci/
+          git fetch origin ci-log || true
+          git checkout --orphan ci-log-tmp
+          git rm -rf --cached . > /dev/null
+          rm -rf ./* .github .gitignore || true
+          cp /tmp/ci/* .
+          git add build.log errors.txt
+          git commit -m "Build log for run ${{ github.run_number }} (${{ job.status }})"
+          git push -f origin HEAD:ci-log

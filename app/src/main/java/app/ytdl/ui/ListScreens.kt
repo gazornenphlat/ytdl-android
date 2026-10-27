@@ -17,7 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -194,7 +194,7 @@ fun LogScreen(ui: Ui, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 18.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconBtn(Icons.Outlined.ArrowBack, "Back", onBack)
+            IconBtn(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onBack)
             Spacer(Modifier.width(14.dp))
             Text("Log", style = H1)
         }
