@@ -147,6 +147,7 @@ class CheckWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
         val ctx = applicationContext
         setForeground(foregroundInfo("Starting downloads"))
         Store.status = "Downloading"
+        Store.log("Downloading ${Store.queue.size} video(s) with yt-dlp ${Downloader.version(ctx)}")
         val items = synchronized(Store.queue) { Store.queue.toList() }
         val gate = Semaphore(Store.S.parallel.coerceIn(1, 4))
         var ok = 0; var failed = 0; var gaveUp = 0

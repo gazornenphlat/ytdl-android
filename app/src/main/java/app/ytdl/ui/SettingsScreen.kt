@@ -64,6 +64,17 @@ fun SettingsScreen(ui: Ui, openLog: () -> Unit) {
         } catch (e: Exception) { toast(ctx, "Couldn't save: ${e.message}") }
     }
     var ytdlpVersion by remember { mutableStateOf("…") }
+    var checking by remember { mutableStateOf(false) }
+    if (checking) CheckVideoDialog({ checking = false }) { url ->
+        checking = false
+        toast(ctx, "Checking… the result will appear in the log")
+        scope.launch {
+            val lines = withContext(Dispatchers.IO) { Downloader.inspect(ctx, url) }
+            Store.log("Check of $url:")
+            lines.forEach { Store.log("  $it") }
+            openLog()
+        }
+    }
     LaunchedEffect(Unit) { ytdlpVersion = withContext(Dispatchers.IO) { Downloader.version(ctx) } }
 
     Page("Settings", null) {
@@ -164,6 +175,9 @@ fun SettingsScreen(ui: Ui, openLog: () -> Unit) {
                             toast(ctx, "yt-dlp $ytdlpVersion")
                         }
                     })
+                }
+                SettingRow("Check a video", "If downloads fail: shows what YouTube offers for one video, in the log") {
+                    NeuButton("Check", { checking = true })
                 }
                 SettingRow("Log", "Everything the app has done") { NeuButton("Open", openLog) }
                 Text("${Store.S.totalDownloaded} videos downloaded so far · app ${appVersion(ctx)}", style = Small)
@@ -308,3 +322,21 @@ fun appVersion(ctx: Context): String = try {
 
 fun toast(ctx: Context, msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
 
+
+@Composable
+private fun CheckVideoDialog(onClose: () -> Unit, onCheck: (String) -> Unit) {
+    var url by remember { mutableStateOf("") }
+    NeuDialog(onClose) {
+        Text("Check a video", style = H2)
+        Spacer(Modifier.height(10.dp))
+        Text("Paste a YouTube video link. ytdl will ask YouTube which formats it offers and write the answer to the log.",
+            style = Small)
+        Spacer(Modifier.height(14.dp))
+        NeuField(url, { url = it }, "https://www.youtube.com/watch?v=…", Modifier.fillMaxWidth(), onDone = { if (url.isNotBlank()) onCheck(url) })
+        Spacer(Modifier.height(18.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
+            NeuButton("Cancel", onClose)
+            NeuButton("Check", { if (url.isNotBlank()) onCheck(url) }, accent = true, enabled = url.isNotBlank())
+        }
+    }
+}

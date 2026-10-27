@@ -54,30 +54,75 @@ object Downloader {
     fun download(ctx: Context, item: QueueItem, onProgress: (String) -> Unit): Result {
         if (!init(ctx)) return Result(Outcome.FAILED, "yt-dlp could not start")
         val work = File(ctx.cacheDir, "dl/${item.videoId}").apply { deleteRecursively(); mkdirs() }
+        try {
+            // Attempt 1: the user's settings. If YouTube hides the formats from the default
+            // player, retry with other YouTube "player clients" and simpler format choices.
+            var last = Result(Outcome.FAILED, "not started")
+            for ((n, attempt) in ATTEMPTS.withIndex()) {
+                work.listFiles()?.forEach { it.deleteRecursively() }
+                val (ok, text) = run(ctx, item, work, attempt, onProgress)
+                val lower = text.lowercase()
+                if ("does not pass filter" in lower || UPCOMING.any { it in lower })
+                    return Result(Outcome.LIVE, "live, upcoming or premiere - will try again later")
+                if (ok) {
+                    val files = work.listFiles()?.filter { it.isFile && !it.name.endsWith(".part") && !it.name.endsWith(".ytdl") }.orEmpty()
+                    if (files.isEmpty()) return Result(Outcome.FAILED, "yt-dlp finished but no file was produced")
+                    val saved = save(ctx, files.maxByOrNull { it.length() }!!, item.list)
+                    if (n > 0) Store.log("  (worked with fallback ${n + 1}: ${attempt.label})")
+                    return Result(Outcome.OK, savedAs = saved)
+                }
+                if (COOKIE_ERRORS.any { it in lower } && n == ATTEMPTS.lastIndex)
+                    return Result(Outcome.COOKIES, "YouTube wants a sign-in")
+                val err = text.lines().lastOrNull { it.contains("ERROR", true) } ?: text.lines().lastOrNull { it.isNotBlank() } ?: "unknown error"
+                last = Result(Outcome.FAILED, err.take(300))
+                // Only formats/sign-in problems are worth retrying another way
+                if (!RETRYABLE.any { it in lower }) break
+            }
+            return last
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    /** One way of asking yt-dlp for a video. */
+    private class Attempt(val label: String, val clients: String?, val simple: Boolean, val cookies: Boolean)
+
+    private val ATTEMPTS = listOf(
+        Attempt("your settings", null, simple = false, cookies = true),
+        Attempt("other YouTube players", "default,android_vr,tv_simply,web_safari", simple = false, cookies = false),
+        Attempt("best single file", "android_vr,mweb,web_embedded", simple = true, cookies = false),
+    )
+    private val RETRYABLE = listOf("requested format is not available", "only images are available",
+        "sign in to confirm", "po token", "this video is unavailable", "http error 403")
+    private val UPCOMING = listOf("premieres in", "this live event will begin", "is_upcoming", "will begin in")
+
+    private fun run(ctx: Context, item: QueueItem, work: File, a: Attempt, onProgress: (String) -> Unit): Pair<Boolean, String> {
         val req = YoutubeDLRequest(item.url).apply {
             if (item.wav) {
-                addOption("-f", "bestaudio/best")
+                addOption("-f", if (a.simple) "ba/b" else "bestaudio/best")
                 addOption("-x")
                 addOption("--audio-format", "wav")
+            } else if (a.simple) {
+                addOption("-f", "b/bv*+ba")
+                addOption("--merge-output-format", "mp4")
             } else {
                 val h = Store.S.maxHeight
                 val cap = if (h > 0) "[height<=$h]" else ""
-                addOption("-f", "bv*$cap+ba/b$cap/b")
+                addOption("-f", "bv*$cap+ba/b$cap/bv*+ba/b")
                 addOption("--merge-output-format", "mp4")
                 if (Store.S.compatVideo) addOption("-S", "vcodec:h264,res,acodec:m4a")
             }
+            if (a.clients != null) addOption("--extractor-args", "youtube:player_client=${a.clients}")
             addOption("-o", File(work, "%(channel)s - %(title)s.%(ext)s").absolutePath)
             addOption("--windows-filenames")      // safe names for SD cards
             addOption("--no-playlist")
             addOption("--no-mtime")
             addOption("--newline")
-            addOption("--extractor-retries", "5")
-            addOption("--retry-sleep", "extractor:3")
+            addOption("--extractor-retries", "3")
             if (Store.S.skipLive)
                 addOption("--match-filter", "!is_live & live_status !=? is_upcoming & live_status !=? post_live")
-            if (Store.cookiesFile.exists()) addOption("--cookies", Store.cookiesFile.absolutePath)
+            if (a.cookies && Store.cookiesFile.exists()) addOption("--cookies", Store.cookiesFile.absolutePath)
         }
-
         val output = StringBuilder()
         val ok = try {
             val resp = YoutubeDL.getInstance().execute(req, item.videoId) { progress, eta, line ->
@@ -90,27 +135,27 @@ object Downloader {
             output.appendLine(e.message ?: e.toString())
             false
         }
-        val text = output.toString()
-        val lower = text.lowercase()
+        return ok to output.toString()
+    }
 
-        try {
-            if ("does not pass filter" in lower) {
-                return Result(Outcome.LIVE, "live or upcoming stream")
+    /** Diagnostics: logs yt-dlp's version and the formats YouTube offers for one video. */
+    fun inspect(ctx: Context, url: String): List<String> {
+        if (!init(ctx)) return listOf("yt-dlp could not start")
+        val out = mutableListOf("yt-dlp ${version(ctx)}")
+        for ((label, clients) in listOf("default player" to null, "other players" to "default,android_vr,tv_simply,web_safari")) {
+            val req = YoutubeDLRequest(Lookup.normalize(url)).apply {
+                addOption("-F"); addOption("--no-playlist")
+                if (clients != null) addOption("--extractor-args", "youtube:player_client=$clients")
             }
-            if (!ok) {
-                if (COOKIE_ERRORS.any { it in lower }) return Result(Outcome.COOKIES, "YouTube wants a sign-in")
-                val err = text.lines().lastOrNull { it.contains("ERROR", true) } ?: text.lines().lastOrNull { it.isNotBlank() } ?: "unknown error"
-                return Result(Outcome.FAILED, err.take(300))
+            out += "--- $label ---"
+            try {
+                val r = YoutubeDL.getInstance().execute(req)
+                out += (r.out + "\n" + r.err).lines().filter { it.isNotBlank() }.take(45)
+            } catch (e: Exception) {
+                out += (e.message ?: e.toString()).lines().filter { it.isNotBlank() }.take(20)
             }
-            val files = work.listFiles()?.filter { it.isFile && !it.name.endsWith(".part") && !it.name.endsWith(".ytdl") }
-                .orEmpty()
-            if (files.isEmpty()) return Result(Outcome.FAILED, "yt-dlp finished but no file was produced")
-            val main = files.maxByOrNull { it.length() }!!
-            val saved = save(ctx, main, item.list)
-            return Result(Outcome.OK, savedAs = saved)
-        } finally {
-            work.deleteRecursively()
         }
+        return out
     }
 
     fun cancel(videoId: String) = try { YoutubeDL.getInstance().destroyProcessById(videoId) } catch (_: Exception) { false }
