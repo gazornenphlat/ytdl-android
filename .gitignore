@@ -1,0 +1,26 @@
+# Build output
+build/
+.gradle/
+local.properties
+*.apk
+*.aab
+captures/
+.externalNativeBuild/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Personal notes
+memory.md
+
+# Signing key - stored as the YTDL_KEYSTORE GitHub secret, never committed
+*.jks
+*.keystore
