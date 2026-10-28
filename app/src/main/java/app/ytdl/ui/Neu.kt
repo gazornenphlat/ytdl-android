@@ -51,6 +51,11 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -80,11 +85,16 @@ fun YtdlTheme(content: @Composable () -> Unit) {
 
 // ------------------------------------------------------------------ soft shadows
 /** Raised neumorphic surface: light shadow top-left, dark shadow bottom-right. */
-fun Modifier.neuRaised(radius: Dp = 16.dp, elevation: Dp = 7.dp, color: Color = Bg) = this.drawBehind {
-    val r = radius.toPx(); val e = elevation.toPx()
+fun Modifier.neuRaised(radius: Dp = 16.dp, elevation: Dp = 7.dp, color: Color = Bg) =
+    this.drawBehind { drawRaised(radius.toPx(), elevation.toPx(), color) }
+
+/** Pressed-in neumorphic surface (fields, wells, selected states). */
+fun Modifier.neuInset(radius: Dp = 12.dp, depth: Dp = 5.dp, color: Color = Bg) =
+    this.drawBehind { drawInset(radius.toPx(), depth.toPx(), color) }
+
+fun DrawScope.drawRaised(r: Float, e: Float, color: Color) {
     drawIntoCanvas { canvas ->
-        val paint = Paint()
-        val fp = paint.asFrameworkPaint()
+        val fp = Paint().asFrameworkPaint()
         fp.isAntiAlias = true
         fp.color = color.toArgb()
         fp.setShadowLayer(e * 1.6f, -e * 0.7f, -e * 0.7f, Light.toArgb())
@@ -96,9 +106,7 @@ fun Modifier.neuRaised(radius: Dp = 16.dp, elevation: Dp = 7.dp, color: Color = 
     }
 }
 
-/** Pressed-in neumorphic surface (fields, wells, selected states). */
-fun Modifier.neuInset(radius: Dp = 12.dp, depth: Dp = 5.dp, color: Color = Bg) = this.drawBehind {
-    val r = radius.toPx(); val d = depth.toPx()
+fun DrawScope.drawInset(r: Float, d: Float, color: Color) {
     val path = Path().apply {
         addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 0f, size.width, size.height, r, r))
     }
@@ -156,11 +164,16 @@ fun NeuButton(
         accent -> Accent
         else -> Ink
     }
+    val pressedNow = rememberUpdatedState(pressed && enabled)
+    val action = rememberUpdatedState(onClick)
     Box(
         modifier
-            .then(if (pressed && enabled) Modifier.neuInset(16.dp, 4.dp) else Modifier.neuRaised(16.dp, 5.dp))
+            .drawBehind {
+                val r = 16.dp.toPx()
+                if (pressedNow.value) drawInset(r, 4.dp.toPx(), Bg) else drawRaised(r, 5.dp.toPx(), Bg)
+            }
             .clip(RoundedCornerShape(16.dp))
-            .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick)
+            .clickable(interactionSource = src, indication = null, enabled = enabled) { action.value() }
             .padding(horizontal = 18.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -199,13 +212,19 @@ fun NeuField(
     modifier: Modifier = Modifier,
     singleLine: Boolean = true,
     onDone: (() -> Unit)? = null,
+    password: Boolean = false,
 ) {
     Box(modifier.neuInset(12.dp, 4.dp).padding(horizontal = 14.dp, vertical = 13.dp)) {
         if (value.isEmpty()) Text(placeholder, style = Body.copy(color = InkSoft))
         BasicTextField(
             value = value, onValueChange = onChange, singleLine = singleLine,
             textStyle = Body, cursorBrush = SolidColor(Accent),
-            keyboardOptions = KeyboardOptions(imeAction = if (onDone != null) ImeAction.Go else ImeAction.Default),
+            keyboardOptions = KeyboardOptions(
+                imeAction = if (onDone != null) ImeAction.Go else ImeAction.Default,
+                keyboardType = if (password) KeyboardType.Password else KeyboardType.Text,
+                autoCorrectEnabled = !password,
+            ),
+            visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardActions = KeyboardActions(onGo = { onDone?.invoke() }),
             modifier = Modifier.fillMaxWidth(),
         )

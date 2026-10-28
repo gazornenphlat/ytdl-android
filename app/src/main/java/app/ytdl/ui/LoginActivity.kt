@@ -24,7 +24,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import app.ytdl.core.Secrets
 import app.ytdl.core.Store
+import androidx.compose.foundation.layout.Arrangement
 
 /**
  * Opens YouTube's normal sign-in page. When you tap "Done", the YouTube cookies are
@@ -49,6 +51,21 @@ class LoginActivity : ComponentActivity() {
                         Spacer(Modifier.width(10.dp))
                         NeuButton("Done", { save() }, accent = true)
                     }
+                    if (Secrets.hasAny(this@LoginActivity)) {
+                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            val email = Secrets.email(this@LoginActivity)
+                            if (email.isNotEmpty()) NeuButton("Copy email", {
+                                Secrets.copy(this@LoginActivity, "Email", email, sensitive = false)
+                                toast(this@LoginActivity, "Email copied - long-press the box to paste")
+                            }, Modifier.weight(1f))
+                            val pw = Secrets.password(this@LoginActivity)
+                            if (pw.isNotEmpty()) NeuButton("Copy password", {
+                                Secrets.copy(this@LoginActivity, "Password", pw, sensitive = true)
+                                toast(this@LoginActivity, "Password copied - it clears from the clipboard in a minute")
+                            }, Modifier.weight(1f), accent = true)
+                        }
+                    }
                     AndroidView(
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                         factory = { c ->
@@ -56,6 +73,9 @@ class LoginActivity : ComponentActivity() {
                                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                                 settings.javaScriptEnabled = true
                                 settings.domStorageEnabled = true
+                                // Google refuses sign-in from "embedded" browsers; look like normal Chrome instead
+                                settings.userAgentString = settings.userAgentString.replace("; wv", "")
+                                    .replace(Regex("Version/\\S+ "), "")
                                 webViewClient = WebViewClient()
                                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                                 loadUrl("https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fm.youtube.com%2F")
@@ -85,6 +105,12 @@ class LoginActivity : ComponentActivity() {
         }
         Store.cookiesFile.writeText(lines.joinToString("\n") + "\n")
         Store.S.cookieProblem = false
+        Store.S.cookieCooldown = 0
+        // Forget this browser session now. If it stayed open, YouTube would keep refreshing
+        // the sign-in and the copy saved for yt-dlp would stop working within hours - which
+        // is what made the app keep asking to sign in again.
+        cm.removeAllCookies(null)
+        cm.flush()
         Store.log("YouTube sign-in saved")
         toast(this, "Signed in - downloads will use this")
         finish()

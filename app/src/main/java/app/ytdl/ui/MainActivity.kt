@@ -95,7 +95,8 @@ fun App(shared: String?, consumeShared: () -> Unit) {
     val version by Store.changes.collectAsState()
     var clock by remember { mutableLongStateOf(now()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); clock = now() } }
-    val ui = Ui(version, clock)
+    // Only the Home dial needs the 1-second clock; other screens refresh when data changes
+    val ui = Ui(version, if (!setup && !showLog && screen == Screen.HOME) clock else 0L)
 
     LaunchedEffect(shared) { if (shared != null) screen = Screen.CHANNELS }
     BackHandler(enabled = showLog || screen != Screen.HOME) {

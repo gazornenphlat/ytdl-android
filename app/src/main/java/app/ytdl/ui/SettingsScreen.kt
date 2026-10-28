@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import app.ytdl.core.Downloader
 import app.ytdl.core.Importer
+import app.ytdl.core.Secrets
 import app.ytdl.core.Store
 import app.ytdl.work.CheckWorker
 import kotlinx.coroutines.Dispatchers
@@ -82,7 +83,7 @@ fun SettingsScreen(ui: Ui, openLog: () -> Unit) {
         item {
             Section("Downloads") {
                 SettingRow("Download folder", folderName(ctx) ?: "Not chosen - files stay in the app's own folder") {
-                    NeuButton("Choose", { pickFolder.launch(null) }, accent = true)
+                    NeuButton("Choose", { safely(ctx, "Choose folder") { pickFolder.launch(null) } }, accent = true)
                 }
                 Divider()
                 NeuToggle(Store.S.allowMobile, { Store.S.allowMobile = it; if (it) CheckWorker.runNow(ctx, false, true) },
@@ -124,7 +125,7 @@ fun SettingsScreen(ui: Ui, openLog: () -> Unit) {
                 SettingRow("Battery optimisation",
                     if (exempt) "ytdl is allowed to run in the background ✓"
                     else "Recommended: let ytdl run in the background so checks aren't skipped") {
-                    if (!exempt) NeuButton("Allow", { requestBatteryExempt(ctx) }, accent = true)
+                    if (!exempt) NeuButton("Allow", { safely(ctx, "Battery setting") { requestBatteryExempt(ctx) } }, accent = true)
                 }
                 Text("Some phones (Samsung, Xiaomi, OnePlus) also need ytdl set to “Unrestricted” in the app's battery settings.",
                     style = Small)
@@ -138,27 +139,32 @@ fun SettingsScreen(ui: Ui, openLog: () -> Unit) {
                     if (signedIn) "Used only if YouTube asks to confirm you're not a bot"
                     else "Only needed if downloads start failing with “sign in to confirm”") {
                     NeuButton(if (signedIn) "Sign in again" else "Sign in", {
-                        ctx.startActivity(Intent(ctx, LoginActivity::class.java))
+                        safely(ctx, "Sign in") { ctx.startActivity(Intent(ctx, LoginActivity::class.java)) }
                     }, accent = true)
                 }
                 if (signedIn) NeuButton("Sign out", {
                     Store.cookiesFile.delete(); android.webkit.CookieManager.getInstance().removeAllCookies(null)
                     Store.bump(); toast(ctx, "Signed out")
                 }, danger = true)
+                Divider()
+                CredentialsBox()
+                Text("Tips if YouTube keeps asking: use 1–2 simultaneous downloads, prefer Wi-Fi (mobile networks " +
+                    "get flagged more often), and after signing in don't sign out of that Google account on other devices.",
+                    style = Small)
             }
         }
         // ---------------------------------------------------------- channels
         item {
             Section("Channels") {
                 SettingRow("Import from the PC", "Pick your FlexGet config.yml - channels, lists and WAV settings come across") {
-                    NeuButton("Import", { importFlexget.launch(arrayOf("*/*")) }, accent = true)
+                    NeuButton("Import", { safely(ctx, "Import") { importFlexget.launch(arrayOf("*/*")) } }, accent = true)
                 }
                 Divider()
                 SettingRow("Back up channels", "Save your channel list to a file") {
-                    NeuButton("Save", { exportBackup.launch("ytdl-channels.json") })
+                    NeuButton("Save", { safely(ctx, "Back up") { exportBackup.launch("ytdl-channels.json") } })
                 }
                 SettingRow("Restore a backup", "Load a file saved with “Back up channels”") {
-                    NeuButton("Load", { importBackup.launch(arrayOf("*/*")) })
+                    NeuButton("Load", { safely(ctx, "Restore") { importBackup.launch(arrayOf("*/*")) } })
                 }
             }
         }
@@ -206,7 +212,7 @@ fun SetupScreen(onDone: () -> Unit) {
             Section("1 · Where should videos go?") {
                 Text(folderName(ctx)?.let { "Saving to: $it" } ?: "Pick a folder, e.g. Movies or a folder on your SD card. Each list gets its own subfolder.",
                     style = Small)
-                NeuButton(if (Store.S.treeUri == null) "Choose folder" else "Change folder", { pickFolder.launch(null) }, accent = true)
+                NeuButton(if (Store.S.treeUri == null) "Choose folder" else "Change folder", { safely(ctx, "Choose folder") { pickFolder.launch(null) } }, accent = true)
             }
             Section("2 · Mobile data") {
                 NeuToggle(Store.S.allowMobile, { Store.S.allowMobile = it }, "Download over mobile data",
@@ -216,13 +222,13 @@ fun SetupScreen(onDone: () -> Unit) {
             Section("3 · Bring your channels over (optional)") {
                 Text("Copy the FlexGet config.yml from your PC to this phone, then pick it here. You can also add channels one by one later.",
                     style = Small)
-                NeuButton("Import config.yml", { importFlexget.launch(arrayOf("*/*")) })
+                NeuButton("Import config.yml", { safely(ctx, "Import") { importFlexget.launch(arrayOf("*/*")) } })
                 if (Store.channels.isNotEmpty()) Text("${Store.channels.size} channels ready ✓", style = Small.copy(color = Ok))
             }
             Section("4 · Let it run in the background") {
                 Text("So Android doesn't stop the checks to save battery.", style = Small)
                 if (isBatteryExempt(ctx)) Text("Allowed ✓", style = Small.copy(color = Ok))
-                else NeuButton("Allow", { requestBatteryExempt(ctx) })
+                else NeuButton("Allow", { safely(ctx, "Battery setting") { requestBatteryExempt(ctx) } })
             }
         }
         NeuButton("Start", {
@@ -309,11 +315,13 @@ fun isBatteryExempt(ctx: Context): Boolean =
 
 @SuppressLint("BatteryLife")
 fun requestBatteryExempt(ctx: Context) {
-    try {
-        ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")))
-    } catch (_: Exception) {
-        ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+    val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}"))
+    val list = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+    val appPage = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+    for (i in listOf(direct, list, appPage)) {
+        try { ctx.startActivity(i); return } catch (_: Exception) { }
     }
+    toast(ctx, "Open Android Settings → Apps → ytdl → Battery → Unrestricted")
 }
 
 fun appVersion(ctx: Context): String = try {
@@ -338,5 +346,53 @@ private fun CheckVideoDialog(onClose: () -> Unit, onCheck: (String) -> Unit) {
             NeuButton("Cancel", onClose)
             NeuButton("Check", { if (url.isNotBlank()) onCheck(url) }, accent = true, enabled = url.isNotBlank())
         }
+    }
+}
+
+/** Saved YouTube email/password, encrypted on the phone, with copy buttons for signing in. */
+@Composable
+private fun CredentialsBox() {
+    val ctx = LocalContext.current
+    var email by remember { mutableStateOf(Secrets.email(ctx)) }
+    var password by remember { mutableStateOf(Secrets.password(ctx)) }
+    var show by remember { mutableStateOf(false) }
+    var saved by remember { mutableStateOf(Secrets.hasAny(ctx)) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Your sign-in details", style = Body)
+        Text("Saved encrypted on this phone only, so you can copy them when YouTube asks you to sign in. " +
+            "The copy buttons also appear on the sign-in screen.", style = Small)
+        NeuField(email, { email = it; saved = false }, "Email or phone", Modifier.fillMaxWidth())
+        NeuField(password, { password = it; saved = false }, "Password", Modifier.fillMaxWidth(), password = !show)
+        NeuToggle(show, { show = it }, "Show password")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            NeuButton(if (saved) "Saved ✓" else "Save", {
+                safely(ctx, "Save sign-in details") {
+                    Secrets.save(ctx, email, password); saved = true
+                    toast(ctx, "Saved")
+                }
+            }, Modifier.weight(1f), accent = !saved, enabled = email.isNotBlank() || password.isNotEmpty())
+            if (saved) NeuButton("Forget", {
+                Secrets.clear(ctx); email = ""; password = ""; saved = false; toast(ctx, "Forgotten")
+            }, danger = true)
+        }
+        if (saved) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (email.isNotEmpty()) NeuButton("Copy email", {
+                Secrets.copy(ctx, "Email", email, sensitive = false); toast(ctx, "Email copied")
+            }, Modifier.weight(1f))
+            if (password.isNotEmpty()) NeuButton("Copy password", {
+                Secrets.copy(ctx, "Password", password, sensitive = true)
+                toast(ctx, "Password copied - clears from the clipboard in a minute")
+            }, Modifier.weight(1f), accent = true)
+        }
+    }
+}
+
+/** Runs a settings action; if it fails, says so instead of silently doing nothing. */
+fun safely(ctx: Context, what: String, block: () -> Unit) {
+    try {
+        block()
+    } catch (e: Exception) {
+        Store.log("$what failed: ${e.message}")
+        toast(ctx, "$what didn't work: ${e.message ?: e.javaClass.simpleName}")
     }
 }

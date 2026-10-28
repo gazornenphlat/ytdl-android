@@ -107,7 +107,7 @@ fun HomeScreen(ui: Ui, openLog: () -> Unit, goTo: (Screen) -> Unit) {
                     val statusColor = when { warn -> Warn; busy -> Ok; paused -> InkSoft; else -> Accent }
                     Text(
                         when {
-                            warn -> "YouTube sign-in needed"
+                            warn -> "YouTube asked for a sign-in - retrying soon"
                             busy && Store.progress.isNotEmpty() -> Store.progress
                             else -> Store.status
                         },

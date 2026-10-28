@@ -108,6 +108,8 @@ object Store {
         var backlogOnAdd: Boolean get() = prefs.getBoolean("backlogOnAdd", false); set(v) = put("backlogOnAdd", v)
         var paused: Boolean get() = prefs.getBoolean("paused", false); set(v) = put("paused", v)
         var cookieProblem: Boolean get() = prefs.getBoolean("cookieProblem", false); set(v) = put("cookieProblem", v)
+        var cookieCooldown: Long get() = prefs.getLong("cookieCooldown", 0); set(v) = put("cookieCooldown", v)
+        var cookieNotified: Long get() = prefs.getLong("cookieNotified", 0); set(v) = put("cookieNotified", v)
         var lastUpdateDay: String get() = prefs.getString("lastUpdateDay", "") ?: ""; set(v) = put("lastUpdateDay", v)
         var lastCheck: Long get() = prefs.getLong("lastCheck", 0); set(v) = put("lastCheck", v)
         var nextRun: Long get() = prefs.getLong("nextRun", 0); set(v) = put("nextRun", v)

@@ -46,7 +46,7 @@ fun ScheduleScreen(ui: Ui) {
     @Suppress("UNUSED_VARIABLE") val v = ui.version
     var query by remember { mutableStateOf("") }
     var onlyOpen by remember { mutableStateOf(false) }
-    val ts = ui.clock - ui.clock % 60   // recompute once a minute
+    val ts = now().let { it - it % 60 }
     val rows = remember(ui.version, ts) {
         Store.channels.toList().sortedBy { it.name.lowercase() }.map { c ->
             val due = Scheduler.isDue(c, ts)

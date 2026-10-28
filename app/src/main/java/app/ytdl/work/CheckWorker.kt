@@ -85,11 +85,10 @@ class CheckWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
             Store.log("${Store.queue.size} video(s) waiting - $block")
             return
         }
-        if (Store.S.cookieProblem && !checkAll) {
-            Store.status = "Paused - YouTube sign-in needed"
+        if (now() < Store.S.cookieCooldown && !checkAll) {
+            Store.status = "Waiting - YouTube asked for a sign-in, retrying ${clock(Store.S.cookieCooldown)}"
             return
         }
-        Store.S.cookieProblem = false
         Downloader.dailyUpdate(ctx)
         downloadQueue()
     }
@@ -179,9 +178,11 @@ class CheckWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
                             Downloader.Outcome.LIVE ->
                                 Store.log("Live/upcoming, will retry later: ${item.title}")
                             Downloader.Outcome.COOKIES -> {
+                                // Not the video's fault: back off for an hour instead of failing it
                                 stop = true
                                 Store.S.cookieProblem = true
-                                Store.log("YouTube wants a sign-in - downloads paused")
+                                Store.S.cookieCooldown = now() + 3600
+                                Store.log("YouTube asked for a sign-in - pausing downloads for an hour")
                             }
                             Downloader.Outcome.FAILED -> {
                                 val q = Store.queue.firstOrNull { it.videoId == item.videoId }
@@ -209,9 +210,17 @@ class CheckWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
         Store.S.lastRunAt = now()
         Store.S.totalDownloaded = Store.S.totalDownloaded + ok
         Store.status = "Idle"
+        if (ok > 0) { Store.S.cookieProblem = false; Store.S.cookieCooldown = 0 }
+        val nagOk = now() - Store.S.cookieNotified > 12 * 3600      // at most twice a day
         when {
-            Store.S.cookieProblem -> notify(ctx, "YouTube sign-in needed",
-                "Open ytdl → Settings → Sign in to YouTube, then tap Run now.")
+            stop && Store.S.cookieProblem && nagOk -> {
+                Store.S.cookieNotified = now()
+                notify(ctx, "YouTube is asking for a sign-in",
+                    if (Store.cookiesFile.exists())
+                        "ytdl will try again in an hour. If this keeps happening, sign in again in Settings."
+                    else "ytdl will try again in an hour. Signing in (Settings → YouTube sign-in) usually stops this.")
+            }
+            stop -> { }
             ok + failed + gaveUp > 0 -> notify(ctx, "Downloads finished", buildString {
                 append("$ok downloaded")
                 if (failed > 0) append(", $failed failed (will retry)")
@@ -281,6 +290,9 @@ class CheckWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
 
         private fun isCharging(ctx: Context): Boolean =
             ctx.getSystemService(BatteryManager::class.java)?.isCharging == true
+
+        private fun clock(ts: Long) =
+            java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts * 1000))
 
         fun updateNext() {
             val (t, n) = Scheduler.nextDue()

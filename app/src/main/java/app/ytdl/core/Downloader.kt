@@ -119,6 +119,10 @@ object Downloader {
             addOption("--no-mtime")
             addOption("--newline")
             addOption("--extractor-retries", "3")
+            // Be gentle with YouTube - bursts of requests are what trigger "confirm you're not a bot"
+            addOption("--sleep-requests", "1")
+            addOption("--sleep-interval", "3")
+            addOption("--max-sleep-interval", "8")
             if (Store.S.skipLive)
                 addOption("--match-filter", "!is_live & live_status !=? is_upcoming & live_status !=? post_live")
             if (a.cookies && Store.cookiesFile.exists()) addOption("--cookies", Store.cookiesFile.absolutePath)
