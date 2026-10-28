@@ -19,6 +19,17 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.Text
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.rememberUpdatedState
+import app.ytdl.core.Downloader
+import app.ytdl.core.FailedItem
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -96,90 +107,178 @@ fun FailedScreen(ui: Ui) {
     val ctx = LocalContext.current
     val sel = remember { mutableStateListOf<String>() }
     val block = remember(ui.version, ui.clock / 10) { CheckWorker.whyNotDownload(ctx) }
+    var undo by remember { mutableStateOf<Undo?>(null) }
+    LaunchedEffect(undo) { if (undo != null) { delay(5000); undo = null } }
 
-    Page("Queue", "${Store.queue.size} waiting · ${Store.failed.size} gave up") {
-        // ---- waiting
-        item {
-            NeuCard(Modifier.fillMaxWidth()) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Label("Waiting to download", Modifier.weight(1f))
-                        if (Store.queue.isNotEmpty())
-                            NeuButton("Download now",
-                                {
-                                    if (block != null) Toast.makeText(ctx, "$block - change this in Settings", Toast.LENGTH_LONG).show()
-                                    else CheckWorker.runNow(ctx, all = false, downloadOnly = true)
-                                }, accent = true, enabled = !Store.busy)
+    fun deleteWaiting(q: QueueItem) {
+        val i = Store.queue.indexOfFirst { it.videoId == q.videoId }
+        if (i < 0) return
+        Store.queue.removeAt(i)
+        Downloader.cancel(q.videoId)
+        Store.save()
+        Store.log("Removed from queue: ${q.title}")
+        undo = Undo("Removed “${q.title.take(40)}”") {
+            if (Store.queue.none { it.videoId == q.videoId }) Store.queue.add(i.coerceAtMost(Store.queue.size), q)
+            Store.save()
+        }
+    }
+
+    fun deleteFailed(f: FailedItem) {
+        val i = Store.failed.indexOfFirst { it.videoId == f.videoId }
+        if (i < 0) return
+        Store.failed.removeAt(i)
+        sel.remove(f.videoId)
+        Store.save()
+        undo = Undo("Removed “${f.title.take(40)}”") {
+            if (Store.failed.none { it.videoId == f.videoId }) Store.failed.add(i.coerceAtMost(Store.failed.size), f)
+            Store.save()
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Page("Queue", "${Store.queue.size} waiting · ${Store.failed.size} gave up · swipe a video to remove it") {
+            // ---- waiting
+            item {
+                NeuCard(Modifier.fillMaxWidth()) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Label("Waiting to download", Modifier.weight(1f))
+                            if (Store.queue.isNotEmpty())
+                                NeuButton("Download now",
+                                    {
+                                        if (block != null) Toast.makeText(ctx, "$block - change this in Settings", Toast.LENGTH_LONG).show()
+                                        else CheckWorker.runNow(ctx, all = false, downloadOnly = true)
+                                    }, accent = true, enabled = !Store.busy)
+                        }
+                        if (block != null && Store.queue.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text("$block. You can change this in Settings.", style = Small.copy(color = Warn))
+                        }
+                        if (Store.queue.isEmpty()) {
+                            Spacer(Modifier.height(10.dp))
+                            Text("Nothing waiting.", style = Small)
+                        }
                     }
-                    if (block != null && Store.queue.isNotEmpty()) {
-                        Spacer(Modifier.height(8.dp))
-                        Text("$block. You can change this in Settings.", style = Small.copy(color = Warn))
+                }
+            }
+            items(Store.queue.toList().take(300), key = { "q" + it.videoId }) { q ->
+                SwipeToDelete(onDelete = { deleteWaiting(q) }) {
+                    Box(Modifier.fillMaxWidth().neuRaised(16.dp, 5.dp).padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        QueueRow(q)
                     }
+                }
+            }
+            if (Store.queue.size > 300) item { Text("…and ${Store.queue.size - 300} more", style = Small) }
+
+            // ---- failed
+            item {
+                Column(Modifier.padding(top = 12.dp)) {
+                    Label("Gave up after ${Store.S.maxFails} tries")
                     Spacer(Modifier.height(10.dp))
-                    if (Store.queue.isEmpty()) Text("Nothing waiting.", style = Small)
-                    Store.queue.toList().take(100).forEach { q -> QueueRow(q) }
-                    if (Store.queue.size > 100) Text("…and ${Store.queue.size - 100} more", style = Small)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NeuToggle(Store.failed.isNotEmpty() && sel.size == Store.failed.size, {
+                            sel.clear(); if (it) sel.addAll(Store.failed.map { f -> f.videoId })
+                        }, "Select all", modifier = Modifier.weight(1f))
+                        NeuButton("Remove", {
+                            Store.failed.removeAll { it.videoId in sel }; sel.clear(); Store.save()
+                        }, danger = true, enabled = sel.isNotEmpty())
+                        NeuButton("Retry", {
+                            val back = Store.failed.filter { it.videoId in sel }
+                            back.forEach { f -> Store.queue += QueueItem(f.videoId, f.title, f.channel, f.list, f.wav, 0) }
+                            Store.failed.removeAll { it.videoId in sel }; sel.clear(); Store.save()
+                            Toast.makeText(ctx, "Put ${back.size} back in the queue", Toast.LENGTH_SHORT).show()
+                        }, accent = true, enabled = sel.isNotEmpty())
+                    }
                 }
             }
-        }
-        // ---- failed
-        item {
-            Column(Modifier.padding(top = 8.dp)) {
-                Label("Gave up after ${Store.S.maxFails} tries")
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    NeuToggle(Store.failed.isNotEmpty() && sel.size == Store.failed.size, {
-                        sel.clear(); if (it) sel.addAll(Store.failed.map { f -> f.videoId })
-                    }, "Select all", modifier = Modifier.weight(1f))
-                    NeuButton("Remove", {
-                        Store.failed.removeAll { it.videoId in sel }; sel.clear(); Store.save()
-                    }, danger = true, enabled = sel.isNotEmpty())
-                    NeuButton("Retry", {
-                        val back = Store.failed.filter { it.videoId in sel }
-                        back.forEach { f -> Store.queue += QueueItem(f.videoId, f.title, f.channel, f.list, f.wav, 0) }
-                        Store.failed.removeAll { it.videoId in sel }; sel.clear(); Store.save()
-                        Toast.makeText(ctx, "Put ${back.size} back in the queue", Toast.LENGTH_SHORT).show()
-                    }, accent = true, enabled = sel.isNotEmpty())
-                }
+            if (Store.failed.isEmpty()) item {
+                NeuCard(Modifier.fillMaxWidth()) { Text("Nothing has failed. 🎉", style = Small) }
             }
-        }
-        if (Store.failed.isEmpty()) item {
-            NeuCard(Modifier.fillMaxWidth()) { Text("Nothing has failed. 🎉", style = Small) }
-        }
-        items(Store.failed.toList().sortedByDescending { it.failedAt }, key = { "f" + it.videoId }) { f ->
-            val s = f.videoId in sel
-            Box(
-                Modifier.fillMaxWidth()
-                    .then(if (s) Modifier.neuInset(16.dp, 4.dp) else Modifier.neuRaised(16.dp, 5.dp))
-                    .noRippleClick { if (s) sel.remove(f.videoId) else sel.add(f.videoId) }
-                    .padding(14.dp)
-            ) {
-                Row(verticalAlignment = Alignment.Top) {
-                    NeuCheck(s)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(f.title.ifEmpty { f.videoId }, style = Body.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text("${f.channel} · ${f.list} · ${ago(f.failedAt)}", style = Small)
-                        Text(f.error, style = Small.copy(color = Bad, fontSize = 12.sp), maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        Text("Open on YouTube", style = Small.copy(color = Accent), modifier = Modifier.padding(top = 4.dp).noRippleClick {
-                            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(f.url)))
-                        })
+            items(Store.failed.toList().sortedByDescending { it.failedAt }, key = { "f" + it.videoId }) { f ->
+                val s = f.videoId in sel
+                SwipeToDelete(onDelete = { deleteFailed(f) }) {
+                    Box(
+                        Modifier.fillMaxWidth()
+                            .then(if (s) Modifier.neuInset(16.dp, 4.dp) else Modifier.neuRaised(16.dp, 5.dp))
+                            .noRippleClick { if (s) sel.remove(f.videoId) else sel.add(f.videoId) }
+                            .padding(14.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            NeuCheck(s)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(f.title.ifEmpty { f.videoId }, style = Body.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text("${f.channel} · ${f.list} · ${ago(f.failedAt)}", style = Small)
+                                Text(f.error, style = Small.copy(color = Bad, fontSize = 12.sp), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                                Text("Open on YouTube", style = Small.copy(color = Accent), modifier = Modifier.padding(top = 4.dp).noRippleClick {
+                                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(f.url)))
+                                })
+                            }
+                        }
                     }
                 }
             }
         }
+        UndoBar(undo, Modifier.align(Alignment.BottomCenter)) { undo?.restore?.invoke(); undo = null }
     }
 }
 
 @Composable
 private fun QueueRow(q: QueueItem) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(q.title.ifEmpty { q.videoId }, style = Body, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text("${q.channel} · ${q.list}" + (if (q.fails > 0) " · failed ${q.fails}×" else ""), style = Small, maxLines = 1)
         }
         Spacer(Modifier.width(8.dp))
         if (q.wav) Pill("WAV", accent = true) else Pill("Video", flat = true)
+    }
+}
+
+/** Something that was just removed and can be put back. */
+class Undo(val message: String, val restore: () -> Unit)
+
+/**
+ * Swipe a row left or right to delete it. The row slides away over a soft red
+ * "Remove" background, matching the AER look.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SwipeToDelete(onDelete: () -> Unit, content: @Composable () -> Unit) {
+    val action = rememberUpdatedState(onDelete)
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { v ->
+            if (v != SwipeToDismissBoxValue.Settled) { action.value(); true } else false
+        },
+        positionalThreshold = { total -> total * 0.35f },
+    )
+    SwipeToDismissBox(
+        state = state,
+        backgroundContent = {
+            val toRight = state.dismissDirection == SwipeToDismissBoxValue.StartToEnd
+            Box(
+                Modifier.fillMaxSize().neuInset(16.dp, 4.dp).padding(horizontal = 22.dp),
+                contentAlignment = if (toRight) Alignment.CenterStart else Alignment.CenterEnd,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Delete, "Remove", tint = Bad, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Remove", style = Small.copy(color = Bad, fontWeight = FontWeight.SemiBold))
+                }
+            }
+        },
+    ) { content() }
+}
+
+@Composable
+fun UndoBar(undo: Undo?, modifier: Modifier = Modifier, onUndo: () -> Unit) {
+    if (undo == null) return
+    Box(modifier.padding(16.dp).fillMaxWidth().neuRaised(20.dp, 7.dp).padding(horizontal = 18.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(undo.message, style = Body, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(12.dp))
+            NeuButton("Undo", onUndo, accent = true)
+        }
     }
 }
 
